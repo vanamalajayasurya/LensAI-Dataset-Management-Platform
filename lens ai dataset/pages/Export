@@ -1,0 +1,463 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Download, FileJson, FileSpreadsheet, Loader2, Box, Layers } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+export default function ExportPage() {
+  const [exporting, setExporting] = useState(false);
+  const [exportOptions, setExportOptions] = useState({
+    includeRejected: false,
+    includePending: false,
+    annotationsOnly: false,
+  });
+
+  const { data: images = [] } = useQuery({
+    queryKey: ['export-images'],
+    queryFn: () => base44.entities.DatasetImage.list("-created_date"),
+  });
+
+  const { data: annotations = [] } = useQuery({
+    queryKey: ['export-annotations'],
+    queryFn: () => base44.entities.Annotation.list(),
+  });
+
+  const getFilteredData = () => {
+    let filtered = images;
+    
+    if (!exportOptions.includeRejected) {
+      filtered = filtered.filter(img => img.status !== "rejected");
+    }
+    
+    if (!exportOptions.includePending) {
+      filtered = filtered.filter(img => img.status !== "pending");
+    }
+
+    if (exportOptions.annotationsOnly) {
+      filtered = filtered.filter(img => img.annotations_count > 0);
+    }
+
+    return filtered;
+  };
+
+  const exportToJSON = async () => {
+    setExporting(true);
+    const filteredImages = getFilteredData();
+    
+    const exportData = filteredImages.map(img => {
+      const imgAnnotations = annotations.filter(ann => ann.image_id === img.id);
+      
+      return {
+        image_id: img.id,
+        filename: img.filename,
+        file_url: img.file_url,
+        category: img.category,
+        subcategory: img.subcategory,
+        resolution: img.resolution,
+        lighting: img.lighting,
+        tags: img.tags,
+        annotations: imgAnnotations.map(ann => ({
+          type: ann.type,
+          bbox: ann.bbox,
+          class_label: ann.class_label,
+          transcription: ann.transcription,
+          attributes: ann.attributes
+        }))
+      };
+    });
+
+    downloadFile(JSON.stringify(exportData, null, 2), `lensai_dataset_${Date.now()}.json`, 'application/json');
+    setExporting(false);
+  };
+
+  const exportToCSV = async () => {
+    setExporting(true);
+    const filteredImages = getFilteredData();
+    
+    const csvRows = [
+      ['Image ID', 'Filename', 'Category', 'Subcategory', 'Resolution', 'Lighting', 'Status', 'Annotations Count', 'Tags', 'File URL']
+    ];
+
+    filteredImages.forEach(img => {
+      csvRows.push([
+        img.id,
+        img.filename,
+        img.category,
+        img.subcategory || '',
+        img.resolution,
+        img.lighting,
+        img.status,
+        img.annotations_count,
+        (img.tags || []).join(';'),
+        img.file_url
+      ]);
+    });
+
+    const csvContent = csvRows.map(row => 
+      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+
+    downloadFile(csvContent, `lensai_dataset_${Date.now()}.csv`, 'text/csv');
+    setExporting(false);
+  };
+
+  const exportToYOLO = async () => {
+    setExporting(true);
+    const filteredImages = getFilteredData();
+    
+    // Get unique class labels
+    const classLabels = [...new Set(
+      annotations
+        .filter(ann => ann.class_label)
+        .map(ann => ann.class_label)
+    )].sort();
+
+    // Create data.yaml
+    const yamlContent = `train: ./train/images
+val: ./val/images
+test: ./test/images
+
+nc: ${classLabels.length}
+names: [${classLabels.map(c => `'${c}'`).join(', ')}]
+`;
+
+    // Create labels for each image
+    const yoloData = filteredImages.map(img => {
+      const imgAnnotations = annotations.filter(ann => ann.image_id === img.id && ann.class_label);
+      const [width, height] = img.resolution.split('x').map(Number);
+      
+      const labels = imgAnnotations.map(ann => {
+        const classIndex = classLabels.indexOf(ann.class_label);
+        const xCenter = (ann.bbox.x + ann.bbox.width / 2) / width;
+        const yCenter = (ann.bbox.y + ann.bbox.height / 2) / height;
+        const bboxWidth = ann.bbox.width / width;
+        const bboxHeight = ann.bbox.height / height;
+        
+        return `${classIndex} ${xCenter.toFixed(6)} ${yCenter.toFixed(6)} ${bboxWidth.toFixed(6)} ${bboxHeight.toFixed(6)}`;
+      }).join('\n');
+
+      return {
+        filename: img.filename.replace(/\.[^/.]+$/, '.txt'),
+        content: labels,
+        image_url: img.file_url
+      };
+    });
+
+    // Package everything
+    const exportPackage = {
+      'data.yaml': yamlContent,
+      labels: yoloData,
+      readme: `YOLO Dataset Export
+Generated: ${new Date().toISOString()}
+Total Images: ${filteredImages.length}
+Classes: ${classLabels.length}
+
+Instructions:
+1. Download all images from the URLs in labels array
+2. Organize into train/val/test folders
+3. Place corresponding .txt files in labels folders
+4. Use data.yaml for training with YOLOv8
+`
+    };
+
+    downloadFile(JSON.stringify(exportPackage, null, 2), `yolo_export_${Date.now()}.json`, 'application/json');
+    setExporting(false);
+  };
+
+  const exportToRoboflow = async () => {
+    setExporting(true);
+    const filteredImages = getFilteredData();
+    
+    const roboflowData = filteredImages.map(img => {
+      const imgAnnotations = annotations.filter(ann => ann.image_id === img.id);
+      
+      return {
+        image: {
+          file_name: img.filename,
+          width: parseInt(img.resolution.split('x')[0]),
+          height: parseInt(img.resolution.split('x')[1]),
+          url: img.file_url
+        },
+        annotations: imgAnnotations.map(ann => ({
+          class: ann.class_label || ann.type,
+          x: ann.bbox.x,
+          y: ann.bbox.y,
+          width: ann.bbox.width,
+          height: ann.bbox.height,
+          ...(ann.transcription && { text: ann.transcription })
+        })),
+        metadata: {
+          category: img.category,
+          lighting: img.lighting,
+          tags: img.tags
+        }
+      };
+    });
+
+    const roboflowPackage = {
+      version: "1.0",
+      export_date: new Date().toISOString(),
+      total_images: filteredImages.length,
+      dataset_name: "LensAI Dataset",
+      images: roboflowData
+    };
+
+    downloadFile(JSON.stringify(roboflowPackage, null, 2), `roboflow_export_${Date.now()}.json`, 'application/json');
+    setExporting(false);
+  };
+
+  const downloadFile = (content, filename, mimeType) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const filteredCount = getFilteredData().length;
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Export Dataset</h1>
+          <p className="text-gray-600">Download your training data in multiple ML-ready formats</p>
+        </div>
+
+        <Tabs defaultValue="standard" className="mb-8">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="standard">Standard Formats</TabsTrigger>
+            <TabsTrigger value="ml">ML Framework Formats</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="standard" className="space-y-6 mt-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <Card className="border-none shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileJson className="w-5 h-5" />
+                    JSON Format
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Export complete dataset with annotations in JSON format. 
+                    Ideal for training scripts and data pipelines.
+                  </p>
+                  <Button
+                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                    onClick={exportToJSON}
+                    disabled={exporting}
+                  >
+                    {exporting ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Export as JSON
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="border-none shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-5 h-5" />
+                    CSV Format
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Export image metadata as CSV. Perfect for analysis, 
+                    filtering, and spreadsheet applications.
+                  </p>
+                  <Button
+                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600"
+                    onClick={exportToCSV}
+                    disabled={exporting}
+                  >
+                    {exporting ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Export as CSV
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="ml" className="space-y-6 mt-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <Card className="border-none shadow-lg border-l-4 border-l-orange-500">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Box className="w-5 h-5" />
+                    YOLOv8 Format
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Export in YOLOv8 training format with data.yaml config, 
+                    normalized bounding boxes, and class labels.
+                  </p>
+                  <Button
+                    className="w-full bg-gradient-to-r from-orange-600 to-red-600"
+                    onClick={exportToYOLO}
+                    disabled={exporting}
+                  >
+                    {exporting ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Export for YOLO
+                  </Button>
+                  <p className="text-xs text-gray-500 mt-2">
+                    ✓ Compatible with Ultralytics YOLOv8
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-none shadow-lg border-l-4 border-l-purple-500">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Layers className="w-5 h-5" />
+                    Roboflow Format
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-600 text-sm mb-4">
+                    Export in Roboflow-compatible JSON format for easy 
+                    import, augmentation, and model training.
+                  </p>
+                  <Button
+                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600"
+                    onClick={exportToRoboflow}
+                    disabled={exporting}
+                  >
+                    {exporting ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4 mr-2" />
+                    )}
+                    Export for Roboflow
+                  </Button>
+                  <p className="text-xs text-gray-500 mt-2">
+                    ✓ Ready for Roboflow upload
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        <Card className="border-none shadow-lg">
+          <CardHeader>
+            <CardTitle>Export Options</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="rejected"
+                checked={exportOptions.includeRejected}
+                onCheckedChange={(checked) => 
+                  setExportOptions({...exportOptions, includeRejected: checked})
+                }
+              />
+              <Label htmlFor="rejected" className="cursor-pointer">
+                Include rejected images
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="pending"
+                checked={exportOptions.includePending}
+                onCheckedChange={(checked) => 
+                  setExportOptions({...exportOptions, includePending: checked})
+                }
+              />
+              <Label htmlFor="pending" className="cursor-pointer">
+                Include pending images
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="annotated"
+                checked={exportOptions.annotationsOnly}
+                onCheckedChange={(checked) => 
+                  setExportOptions({...exportOptions, annotationsOnly: checked})
+                }
+              />
+              <Label htmlFor="annotated" className="cursor-pointer">
+                Only images with annotations
+              </Label>
+            </div>
+
+            <div className="pt-4 border-t">
+              <p className="text-sm text-gray-600">
+                <strong>{filteredCount}</strong> images will be exported with current filters
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mt-6 border-none shadow-lg bg-blue-50">
+          <CardContent className="p-6">
+            <h3 className="font-semibold mb-3">Format Examples</h3>
+            <Tabs defaultValue="yolo">
+              <TabsList>
+                <TabsTrigger value="yolo">YOLO</TabsTrigger>
+                <TabsTrigger value="roboflow">Roboflow</TabsTrigger>
+              </TabsList>
+              <TabsContent value="yolo">
+                <div className="bg-white rounded-lg p-4 font-mono text-xs overflow-x-auto">
+                  <pre>{`# data.yaml
+train: ./train/images
+val: ./val/images
+nc: 3
+names: ['bottle', 'phone', 'book']
+
+# label file (normalized coordinates)
+0 0.512 0.423 0.145 0.287
+1 0.234 0.678 0.098 0.156`}</pre>
+                </div>
+              </TabsContent>
+              <TabsContent value="roboflow">
+                <div className="bg-white rounded-lg p-4 font-mono text-xs overflow-x-auto">
+                  <pre>{`{
+  "image": {
+    "file_name": "img_001.jpg",
+    "width": 640,
+    "height": 640
+  },
+  "annotations": [
+    {
+      "class": "bottle",
+      "x": 45,
+      "y": 78,
+      "width": 110,
+      "height": 200
+    }
+  ]
+}`}</pre>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

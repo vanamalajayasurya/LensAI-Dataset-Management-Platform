@@ -1,0 +1,80 @@
+{
+  "name": "Image",
+  "type": "object",
+  "properties": {
+    "file_url": {
+      "type": "string",
+      "description": "URL of the uploaded image"
+    },
+    "ocr_text": {
+      "type": "string",
+      "description": "Extracted text from the image"
+    },
+    "translation": {
+      "type": "string",
+      "description": "Translated text"
+    },
+    "caption": {
+      "type": "string",
+      "description": "AI-generated description of the image"
+    },
+    "objects_detected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Object class name"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Detection confidence (0-1)"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Bounding box [x, y, width, height]"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional attributes like brand, color"
+          }
+        },
+        "required": [
+          "label",
+          "bbox"
+        ]
+      },
+      "description": "Detected objects with bounding boxes"
+    },
+    "visual_qa": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Questions and answers about the image"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Category tags"
+    }
+  },
+  "required": [
+    "file_url"
+  ]
+}

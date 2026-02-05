@@ -1,0 +1,251 @@
+import React, { useState, useRef, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, ArrowRight, Save, Trash2, Plus } from "lucide-react";
+import { createPageUrl } from "@/utils";
+
+import AnnotationCanvas from "../components/annotate/AnnotationCanvas";
+import AnnotationList from "../components/annotate/AnnotationList";
+
+const ANNOTATION_TYPES = ["text", "object", "logo", "landmark", "product"];
+
+export default function AnnotatePage() {
+  const queryClient = useQueryClient();
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentAnnotation, setCurrentAnnotation] = useState(null);
+  const [annotationType, setAnnotationType] = useState("object");
+  const [classLabel, setClassLabel] = useState("");
+  const [transcription, setTranscription] = useState("");
+
+  const { data: images = [] } = useQuery({
+    queryKey: ['dataset-images-unannotated'],
+    queryFn: async () => {
+      const allImages = await base44.entities.DatasetImage.list("-created_date");
+      return allImages.filter(img => img.status !== "rejected");
+    },
+  });
+
+  const currentImage = images[currentIndex];
+
+  const { data: annotations = [] } = useQuery({
+    queryKey: ['annotations', currentImage?.id],
+    queryFn: () => base44.entities.Annotation.filter({ image_id: currentImage.id }),
+    enabled: !!currentImage,
+  });
+
+  const createAnnotationMutation = useMutation({
+    mutationFn: (data) => base44.entities.Annotation.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['annotations', currentImage.id] });
+      queryClient.invalidateQueries({ queryKey: ['dataset-images-unannotated'] });
+    },
+  });
+
+  const deleteAnnotationMutation = useMutation({
+    mutationFn: (id) => base44.entities.Annotation.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['annotations', currentImage.id] });
+    },
+  });
+
+  const updateImageMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.DatasetImage.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataset-images-unannotated'] });
+    },
+  });
+
+  const handleBBoxComplete = (bbox) => {
+    setCurrentAnnotation(bbox);
+  };
+
+  const handleSaveAnnotation = async () => {
+    if (!currentAnnotation || !currentImage) return;
+
+    const annotationData = {
+      image_id: currentImage.id,
+      type: annotationType,
+      bbox: currentAnnotation,
+      class_label: classLabel || null,
+      transcription: transcription || null,
+      confidence: 1.0,
+      attributes: {}
+    };
+
+    await createAnnotationMutation.mutateAsync(annotationData);
+    await updateImageMutation.mutateAsync({
+      id: currentImage.id,
+      data: {
+        annotations_count: annotations.length + 1,
+        status: "annotated"
+      }
+    });
+
+    setCurrentAnnotation(null);
+    setClassLabel("");
+    setTranscription("");
+  };
+
+  const handleDeleteAnnotation = async (id) => {
+    await deleteAnnotationMutation.mutateAsync(id);
+    if (currentImage) {
+      await updateImageMutation.mutateAsync({
+        id: currentImage.id,
+        data: { annotations_count: Math.max(0, annotations.length - 1) }
+      });
+    }
+  };
+
+  const goToNext = () => {
+    if (currentIndex < images.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setCurrentAnnotation(null);
+    }
+  };
+
+  const goToPrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+      setCurrentAnnotation(null);
+    }
+  };
+
+  if (!currentImage) {
+    return (
+      <div className="min-h-screen p-8 flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <p className="text-gray-600 mb-4">No images available for annotation</p>
+          <Button onClick={() => window.location.href = createPageUrl("Upload")}>
+            Upload Images
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Image Annotation</h1>
+            <p className="text-gray-600">
+              Image {currentIndex + 1} of {images.length}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={goToPrevious}
+              disabled={currentIndex === 0}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              onClick={goToNext}
+              disabled={currentIndex === images.length - 1}
+            >
+              Next
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Card className="border-none shadow-lg">
+              <CardContent className="p-4">
+                <AnnotationCanvas
+                  imageUrl={currentImage.file_url}
+                  annotations={annotations}
+                  onBBoxComplete={handleBBoxComplete}
+                  currentBBox={currentAnnotation}
+                />
+                
+                <div className="mt-4 flex items-center justify-between">
+                  <Badge variant="secondary">
+                    {currentImage.category} - {currentImage.subcategory || "No subcategory"}
+                  </Badge>
+                  <p className="text-sm text-gray-600">
+                    {annotations.length} annotation{annotations.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card className="border-none shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-lg">Add Annotation</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>Annotation Type</Label>
+                  <Select value={annotationType} onValueChange={setAnnotationType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ANNOTATION_TYPES.map(type => (
+                        <SelectItem key={type} value={type}>
+                          {type.charAt(0).toUpperCase() + type.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {annotationType === "text" ? (
+                  <div>
+                    <Label>Text Transcription</Label>
+                    <Input
+                      value={transcription}
+                      onChange={(e) => setTranscription(e.target.value)}
+                      placeholder="Enter visible text"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Class Label</Label>
+                    <Input
+                      value={classLabel}
+                      onChange={(e) => setClassLabel(e.target.value)}
+                      placeholder="e.g., bottle, phone, logo"
+                    />
+                  </div>
+                )}
+
+                <Button
+                  className="w-full"
+                  onClick={handleSaveAnnotation}
+                  disabled={!currentAnnotation}
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Annotation
+                </Button>
+
+                <p className="text-xs text-gray-500 text-center">
+                  Draw a box on the image to annotate
+                </p>
+              </CardContent>
+            </Card>
+
+            <AnnotationList
+              annotations={annotations}
+              onDelete={handleDeleteAnnotation}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,288 @@
+import React, { useState, useRef } from "react";
+import { base44 } from "@/api/base44Client";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Camera, Upload, Loader2, Sparkles, ImageIcon, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+
+export default function CameraPage() {
+  const navigate = useNavigate();
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setPreviewUrl(URL.createObjectURL(file));
+    await processImage(file);
+  };
+
+  const processImage = async (file, searchMode = false) => {
+    setIsUploading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      setUploadedImageUrl(file_url);
+      
+      if (searchMode) {
+        // Visual product search mode
+        await searchSimilarProducts(file_url);
+      } else {
+        // Original analysis mode
+        const imageRecord = await base44.entities.Image.create({
+          file_url,
+          tags: []
+        });
+        navigate(createPageUrl("Analysis") + `?id=${imageRecord.id}`);
+      }
+    } catch (error) {
+      console.error("Error uploading image:", error);
+    }
+    setIsUploading(false);
+  };
+
+  const searchSimilarProducts = async (imageUrl) => {
+    setIsSearching(true);
+    try {
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt: `Analyze this image and identify the main items/products visible. Then find visually similar products available for purchase online.
+
+For each product found, provide:
+- product_name: Full product name with brand/model
+- description: Brief 1-line description
+- match_type: "exact" or "similar"
+- price_range: Approximate price in INR (if available)
+- source: Shopping platform (Amazon India, Flipkart, etc.)
+- product_url: Direct shopping link
+- image_url: Product image URL
+- category: Product category (electronics, clothing, furniture, etc.)
+
+Find 6-10 products with good visual matches. Return valid JSON.`,
+        file_urls: [imageUrl],
+        add_context_from_internet: true,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            products: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  product_name: { type: "string" },
+                  description: { type: "string" },
+                  match_type: { type: "string" },
+                  price_range: { type: "string" },
+                  source: { type: "string" },
+                  product_url: { type: "string" },
+                  image_url: { type: "string" },
+                  category: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      setSearchResults(result.products || []);
+    } catch (error) {
+      console.error("Error searching products:", error);
+      setSearchResults([]);
+    }
+    setIsSearching(false);
+  };
+
+  const handleReset = () => {
+    setPreviewUrl(null);
+    setUploadedImageUrl(null);
+    setSearchResults([]);
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-500 to-blue-600 rounded-3xl mb-4 shadow-2xl">
+            <Sparkles className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 bg-clip-text text-transparent mb-3">
+            Visual Intelligence
+          </h1>
+          <p className="text-gray-600 text-lg">Capture or upload an image to unlock AI insights</p>
+        </div>
+
+        {previewUrl && !searchResults.length && (
+          <Card className="mb-8 overflow-hidden border-none shadow-2xl">
+            <img 
+              src={previewUrl} 
+              alt="Preview" 
+              className="w-full h-64 object-cover"
+            />
+            <div className="p-4 bg-white flex gap-3">
+              <Button 
+                onClick={() => processImage(fileInputRef.current?.files?.[0] || cameraInputRef.current?.files?.[0], true)}
+                className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600"
+                disabled={isSearching}
+              >
+                {isSearching ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                Find Similar Products
+              </Button>
+              <Button 
+                onClick={() => processImage(fileInputRef.current?.files?.[0] || cameraInputRef.current?.files?.[0], false)}
+                variant="outline"
+                disabled={isUploading}
+              >
+                Analyze Image
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          <Card className="p-8 border-none shadow-xl hover:shadow-2xl transition-all duration-300 bg-gradient-to-br from-white to-purple-50 group cursor-pointer"
+               onClick={() => cameraInputRef.current?.click()}>
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-purple-500 to-blue-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg">
+                <Camera className="w-8 h-8 text-white" />
+              </div>
+              <h3 className="text-xl font-bold mb-2 text-gray-900">Take Photo</h3>
+              <p className="text-gray-600 text-sm">Use your camera to capture</p>
+            </div>
+          </Card>
+
+          <Card className="p-8 border-none shadow-xl hover:shadow-2xl transition-all duration-300 bg-gradient-to-br from-white to-blue-50 group cursor-pointer"
+               onClick={() => fileInputRef.current?.click()}>
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg">
+                <Upload className="w-8 h-8 text-white" />
+              </div>
+              <h3 className="text-xl font-bold mb-2 text-gray-900">Upload Image</h3>
+              <p className="text-gray-600 text-sm">Choose from your gallery</p>
+            </div>
+          </Card>
+        </div>
+
+        {isSearching && (
+          <Card className="mt-8 p-8 border-none shadow-xl bg-white/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+              <p className="text-gray-600 font-medium">Searching for similar products...</p>
+              <p className="text-sm text-gray-500">This may take a few moments</p>
+            </div>
+          </Card>
+        )}
+
+        {searchResults.length > 0 && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Similar Products Found</h2>
+                <p className="text-gray-600 mt-1">{searchResults.length} visually similar items</p>
+              </div>
+              <Button variant="outline" onClick={handleReset}>
+                <Upload className="w-4 h-4 mr-2" />
+                New Search
+              </Button>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {searchResults.map((product, index) => (
+                <Card key={index} className="border-none shadow-xl hover:shadow-2xl transition-all duration-300 overflow-hidden group">
+                  {product.image_url && (
+                    <div className="relative h-48 bg-gray-100 overflow-hidden">
+                      <img
+                        src={product.image_url}
+                        alt={product.product_name}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                      {product.match_type === 'exact' && (
+                        <Badge className="absolute top-2 left-2 bg-green-500 text-white">
+                          Exact Match
+                        </Badge>
+                      )}
+                      {product.category && (
+                        <Badge className="absolute top-2 right-2 bg-white/90 text-gray-800">
+                          {product.category}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                  <div className="p-4">
+                    <h3 className="font-bold text-gray-900 mb-1 line-clamp-2 group-hover:text-purple-600 transition-colors">
+                      {product.product_name}
+                    </h3>
+                    {product.description && (
+                      <p className="text-sm text-gray-600 mb-3 line-clamp-2">{product.description}</p>
+                    )}
+                    {product.price_range && (
+                      <p className="text-lg font-bold text-green-600 mb-2">{product.price_range}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">{product.source}</span>
+                      <a
+                        href={product.product_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-purple-600 hover:text-purple-800 font-medium text-sm flex items-center gap-1"
+                      >
+                        View Product
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isUploading && !isSearching && (
+          <Card className="mt-8 p-8 border-none shadow-xl bg-white/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="w-12 h-12 text-purple-600 animate-spin" />
+              <p className="text-gray-600 font-medium">Processing your image...</p>
+            </div>
+          </Card>
+        )}
+
+        <div className="mt-12 grid md:grid-cols-3 gap-4">
+          {[
+            { icon: ImageIcon, title: "Smart Recognition", desc: "Identify objects & scenes" },
+            { icon: Sparkles, title: "AI Captions", desc: "Natural language descriptions" },
+            { icon: Camera, title: "Text Extraction", desc: "OCR & translation support" }
+          ].map((feature, i) => (
+            <Card key={i} className="p-4 border-purple-100 bg-white/60 backdrop-blur-sm">
+              <feature.icon className="w-6 h-6 text-purple-600 mb-2" />
+              <h4 className="font-semibold text-sm mb-1">{feature.title}</h4>
+              <p className="text-xs text-gray-600">{feature.desc}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

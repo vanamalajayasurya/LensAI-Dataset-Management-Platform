@@ -1,0 +1,40 @@
+import React from "react";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { MessageSquare, Send } from "lucide-react";
+
+export default function QuestionInput({ question, setQuestion, onAsk }) {
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onAsk();
+  };
+
+  return (
+    <Card className="border-none shadow-xl p-4">
+      <form onSubmit={handleSubmit}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
+            <MessageSquare className="w-4 h-4 text-white" />
+          </div>
+          <h3 className="font-semibold">Ask a Question</h3>
+        </div>
+        <div className="flex gap-2">
+          <Input
+            placeholder="What do you see in this image?"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            className="flex-1"
+          />
+          <Button 
+            type="submit" 
+            disabled={!question.trim()}
+            className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700"
+          >
+            <Send className="w-4 h-4" />
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}

@@ -1,0 +1,158 @@
+
+import React from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { 
+  Database, Upload, CheckCircle, AlertCircle, 
+  Pencil, TrendingUp, Image as ImageIcon, Tag,
+  LayoutDashboard // Added LayoutDashboard icon
+} from "lucide-react";
+
+import StatsCard from "../components/dashboard/StatsCard";
+import CategoryChart from "../components/dashboard/CategoryChart";
+import RecentActivity from "../components/dashboard/RecentActivity";
+
+const navigationItems = [
+  {
+    title: "Dashboard",
+    url: createPageUrl("Dashboard"),
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Upload Images",
+    url: createPageUrl("Upload"),
+    icon: Upload,
+  },
+];
+
+export default function DashboardPage() {
+  const { data: images = [], isLoading: imagesLoading } = useQuery({
+    queryKey: ['dataset-images'],
+    queryFn: () => base44.entities.DatasetImage.list("-created_date"),
+  });
+
+  const { data: annotations = [], isLoading: annotationsLoading } = useQuery({
+    queryKey: ['annotations'],
+    queryFn: () => base44.entities.Annotation.list("-created_date"),
+  });
+
+  const stats = {
+    total: images.length,
+    pending: images.filter(img => img.status === "pending").length,
+    approved: images.filter(img => img.status === "approved").length,
+    annotated: images.filter(img => img.status === "annotated").length,
+    annotations: annotations.length,
+  };
+
+  const categoryStats = images.reduce((acc, img) => {
+    acc[img.category] = (acc[img.category] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Dataset Dashboard</h1>
+            <p className="text-gray-600">Manage and track your LensAI training dataset</p>
+          </div>
+          <div className="flex gap-3">
+            <Link to={createPageUrl("Upload")}>
+              <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
+                <Upload className="w-4 h-4 mr-2" />
+                Upload Images
+              </Button>
+            </Link>
+            <Link to={createPageUrl("Export")}>
+              <Button variant="outline">
+                <Database className="w-4 h-4 mr-2" />
+                Export Data
+              </Button>
+            </Link>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatsCard
+            title="Total Images"
+            value={stats.total}
+            icon={ImageIcon}
+            gradient="from-blue-500 to-cyan-500"
+          />
+          <StatsCard
+            title="Pending Review"
+            value={stats.pending}
+            icon={AlertCircle}
+            gradient="from-yellow-500 to-orange-500"
+          />
+          <StatsCard
+            title="Approved"
+            value={stats.approved}
+            icon={CheckCircle}
+            gradient="from-green-500 to-emerald-500"
+          />
+          <StatsCard
+            title="Annotations"
+            value={stats.annotations}
+            icon={Tag}
+            gradient="from-purple-500 to-pink-500"
+          />
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-6 mb-8">
+          <CategoryChart categoryStats={categoryStats} />
+          <RecentActivity images={images.slice(0, 10)} />
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          <Link to={createPageUrl("Annotate")}>
+            <Card className="border-none shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer bg-gradient-to-br from-white to-blue-50">
+              <CardHeader>
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center mb-3">
+                  <Pencil className="w-6 h-6 text-white" />
+                </div>
+                <CardTitle>Start Annotating</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-600">Add bounding boxes and labels to images</p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to={createPageUrl("Split")}>
+            <Card className="border-none shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer bg-gradient-to-br from-white to-purple-50">
+              <CardHeader>
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center mb-3">
+                  <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+                <CardTitle>Dataset Split</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-600">Split into train/val/test sets</p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to={createPageUrl("Augmentation")}>
+            <Card className="border-none shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer bg-gradient-to-br from-white to-orange-50">
+              <CardHeader>
+                <div className="w-12 h-12 bg-gradient-to-br from-orange-600 to-red-600 rounded-xl flex items-center justify-center mb-3">
+                  <CheckCircle className="w-6 h-6 text-white" />
+                </div>
+                <CardTitle>Augmentation Preview</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-600">Visualize data augmentation effects</p>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}

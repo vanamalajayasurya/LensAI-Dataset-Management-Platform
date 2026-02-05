@@ -1,0 +1,85 @@
+{
+  "name": "DatasetImage",
+  "type": "object",
+  "properties": {
+    "file_url": {
+      "type": "string",
+      "description": "URL of the uploaded image"
+    },
+    "filename": {
+      "type": "string",
+      "description": "Original filename"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "text",
+        "logo",
+        "landmark",
+        "object",
+        "product",
+        "scene",
+        "document",
+        "receipt",
+        "sign",
+        "label"
+      ],
+      "description": "Primary image category"
+    },
+    "subcategory": {
+      "type": "string",
+      "description": "Specific object class (bottle, phone, book, etc.)"
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Image resolution (e.g., 640x640)"
+    },
+    "lighting": {
+      "type": "string",
+      "enum": [
+        "bright",
+        "normal",
+        "dim",
+        "backlit",
+        "artificial"
+      ],
+      "description": "Lighting condition"
+    },
+    "source": {
+      "type": "string",
+      "description": "Source of the image (camera, upload, web, etc.)"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "annotated"
+      ],
+      "default": "pending",
+      "description": "Review status"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Custom tags"
+    },
+    "annotations_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Number of annotations"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Additional notes"
+    }
+  },
+  "required": [
+    "file_url",
+    "filename",
+    "category"
+  ]
+}

@@ -1,0 +1,104 @@
+import React, { useRef, useState, useEffect } from "react";
+
+export default function AnnotationCanvas({ imageUrl, annotations, onBBoxComplete, currentBBox }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [startPos, setStartPos] = useState(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const imageRef = useRef(new Image());
+
+  useEffect(() => {
+    imageRef.current.src = imageUrl;
+    imageRef.current.onload = () => setImageLoaded(true);
+  }, [imageUrl]);
+
+  useEffect(() => {
+    if (!imageLoaded) return;
+    drawCanvas();
+  }, [imageLoaded, annotations, currentBBox]);
+
+  const drawCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const img = imageRef.current;
+    
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    ctx.drawImage(img, 0, 0);
+    
+    annotations.forEach(ann => {
+      if (ann.bbox) {
+        ctx.strokeStyle = '#4F46E5';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(ann.bbox.x, ann.bbox.y, ann.bbox.width, ann.bbox.height);
+        
+        ctx.fillStyle = '#4F46E5';
+        ctx.font = '14px sans-serif';
+        ctx.fillText(ann.class_label || ann.transcription || ann.type, ann.bbox.x, ann.bbox.y - 5);
+      }
+    });
+
+    if (currentBBox) {
+      ctx.strokeStyle = '#10B981';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(currentBBox.x, currentBBox.y, currentBBox.width, currentBBox.height);
+      ctx.setLineDash([]);
+    }
+  };
+
+  const getMousePos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const handleMouseDown = (e) => {
+    const pos = getMousePos(e);
+    setIsDrawing(true);
+    setStartPos(pos);
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDrawing || !startPos) return;
+    
+    const currentPos = getMousePos(e);
+    const bbox = {
+      x: Math.min(startPos.x, currentPos.x),
+      y: Math.min(startPos.y, currentPos.y),
+      width: Math.abs(currentPos.x - startPos.x),
+      height: Math.abs(currentPos.y - startPos.y)
+    };
+    
+    onBBoxComplete(bbox);
+  };
+
+  const handleMouseUp = () => {
+    setIsDrawing(false);
+  };
+
+  return (
+    <div className="relative bg-gray-100 rounded-lg overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        className="w-full h-auto cursor-crosshair"
+        style={{ maxHeight: '600px' }}
+      />
+      <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-3 py-1 rounded">
+        Click and drag to create bounding box
+      </div>
+    </div>
+  );
+}

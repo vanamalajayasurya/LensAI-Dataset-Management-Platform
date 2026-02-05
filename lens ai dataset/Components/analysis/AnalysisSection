@@ -1,0 +1,26 @@
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export default function AnalysisSection({ icon: Icon, title, content, bgGradient }) {
+  if (!content) return null;
+
+  return (
+    <Card className="border-none shadow-xl">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-8 h-8 bg-gradient-to-br ${bgGradient} rounded-lg flex items-center justify-center`}>
+            <Icon className="w-4 h-4 text-white" />
+          </div>
+          <CardTitle className="text-lg">{title}</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {typeof content === 'string' ? (
+          <p className="text-gray-700 leading-relaxed">{content}</p>
+        ) : (
+          content
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,0 +1,309 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Split, Shuffle, Download, Info } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+
+export default function SplitPage() {
+  const [splitRatios, setSplitRatios] = useState({
+    train: 80,
+    val: 10,
+    test: 10
+  });
+  const [splitting, setSplitting] = useState(false);
+  const [splitResult, setSplitResult] = useState(null);
+
+  const { data: images = [] } = useQuery({
+    queryKey: ['split-images'],
+    queryFn: async () => {
+      const all = await base44.entities.DatasetImage.list();
+      return all.filter(img => img.status !== "rejected" && img.annotations_count > 0);
+    },
+  });
+
+  const updateImageMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.DatasetImage.update(id, data),
+  });
+
+  const handleRatioChange = (split, value) => {
+    const numValue = parseInt(value) || 0;
+    const others = Object.keys(splitRatios).filter(k => k !== split);
+    const remaining = 100 - numValue;
+    const perOther = Math.floor(remaining / others.length);
+    
+    setSplitRatios({
+      ...splitRatios,
+      [split]: numValue,
+      [others[0]]: perOther,
+      [others[1]]: remaining - perOther
+    });
+  };
+
+  const shuffleArray = (array) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
+
+  const handleSplit = async () => {
+    setSplitting(true);
+    setSplitResult(null);
+
+    try {
+      // Group images by category for balanced split
+      const byCategory = images.reduce((acc, img) => {
+        if (!acc[img.category]) acc[img.category] = [];
+        acc[img.category].push(img);
+        return acc;
+      }, {});
+
+      const trainSet = [];
+      const valSet = [];
+      const testSet = [];
+
+      // Split each category proportionally
+      Object.values(byCategory).forEach(categoryImages => {
+        const shuffled = shuffleArray(categoryImages);
+        const total = shuffled.length;
+        
+        const trainCount = Math.floor(total * splitRatios.train / 100);
+        const valCount = Math.floor(total * splitRatios.val / 100);
+        
+        trainSet.push(...shuffled.slice(0, trainCount));
+        valSet.push(...shuffled.slice(trainCount, trainCount + valCount));
+        testSet.push(...shuffled.slice(trainCount + valCount));
+      });
+
+      // Update images with split assignment
+      for (const img of trainSet) {
+        await updateImageMutation.mutateAsync({
+          id: img.id,
+          data: { tags: [...(img.tags || []).filter(t => !t.startsWith('split:')), 'split:train'] }
+        });
+      }
+      
+      for (const img of valSet) {
+        await updateImageMutation.mutateAsync({
+          id: img.id,
+          data: { tags: [...(img.tags || []).filter(t => !t.startsWith('split:')), 'split:val'] }
+        });
+      }
+      
+      for (const img of testSet) {
+        await updateImageMutation.mutateAsync({
+          id: img.id,
+          data: { tags: [...(img.tags || []).filter(t => !t.startsWith('split:')), 'split:test'] }
+        });
+      }
+
+      setSplitResult({
+        train: trainSet.length,
+        val: valSet.length,
+        test: testSet.length,
+        total: images.length
+      });
+
+    } catch (error) {
+      console.error('Split error:', error);
+    }
+
+    setSplitting(false);
+  };
+
+  const downloadSplitReport = () => {
+    if (!splitResult) return;
+
+    const report = {
+      split_date: new Date().toISOString(),
+      ratios: splitRatios,
+      counts: splitResult,
+      distribution: {
+        train_percent: ((splitResult.train / splitResult.total) * 100).toFixed(1),
+        val_percent: ((splitResult.val / splitResult.total) * 100).toFixed(1),
+        test_percent: ((splitResult.test / splitResult.total) * 100).toFixed(1)
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `split_report_${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const totalRatio = splitRatios.train + splitRatios.val + splitRatios.test;
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Dataset Split</h1>
+          <p className="text-gray-600">Split your dataset into train, validation, and test sets</p>
+        </div>
+
+        <Card className="border-none shadow-lg mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Split className="w-5 h-5" />
+              Split Configuration
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid md:grid-cols-3 gap-6">
+              <div>
+                <Label htmlFor="train">Training Set (%)</Label>
+                <Input
+                  id="train"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={splitRatios.train}
+                  onChange={(e) => handleRatioChange('train', e.target.value)}
+                  className="mt-2"
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  {Math.floor(images.length * splitRatios.train / 100)} images
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="val">Validation Set (%)</Label>
+                <Input
+                  id="val"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={splitRatios.val}
+                  onChange={(e) => handleRatioChange('val', e.target.value)}
+                  className="mt-2"
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  {Math.floor(images.length * splitRatios.val / 100)} images
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="test">Test Set (%)</Label>
+                <Input
+                  id="test"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={splitRatios.test}
+                  onChange={(e) => handleRatioChange('test', e.target.value)}
+                  className="mt-2"
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  {Math.floor(images.length * splitRatios.test / 100)} images
+                </p>
+              </div>
+            </div>
+
+            {totalRatio !== 100 && (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  Total must equal 100% (current: {totalRatio}%)
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="pt-4 border-t">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Total Available Images</span>
+                <span className="font-bold">{images.length}</span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Only approved and annotated images will be included
+              </p>
+            </div>
+
+            <Button
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
+              onClick={handleSplit}
+              disabled={splitting || totalRatio !== 100 || images.length === 0}
+            >
+              {splitting ? (
+                <>Processing...</>
+              ) : (
+                <>
+                  <Shuffle className="w-4 h-4 mr-2" />
+                  Perform Split
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {splitResult && (
+          <Card className="border-none shadow-lg mb-6 bg-green-50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-green-800">
+                <Split className="w-5 h-5" />
+                Split Complete
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-600">{splitResult.train}</p>
+                  <p className="text-sm text-gray-600">Training</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-purple-600">{splitResult.val}</p>
+                  <p className="text-sm text-gray-600">Validation</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-orange-600">{splitResult.test}</p>
+                  <p className="text-sm text-gray-600">Test</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Train</span>
+                  <span>{((splitResult.train / splitResult.total) * 100).toFixed(1)}%</span>
+                </div>
+                <Progress value={(splitResult.train / splitResult.total) * 100} className="h-2" />
+              </div>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={downloadSplitReport}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download Split Report
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="border-none shadow-lg bg-blue-50">
+          <CardContent className="p-6 flex gap-3">
+            <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-gray-700">
+              <p className="font-medium mb-2">How it works:</p>
+              <ul className="space-y-1 text-xs">
+                <li>• Images are shuffled randomly within each category</li>
+                <li>• Ensures balanced class distribution across splits</li>
+                <li>• Split tags are added to image metadata</li>
+                <li>• You can re-split anytime (previous tags are overwritten)</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,233 @@
+import React, { useState, useRef } from "react";
+import { base44 } from "@/api/base44Client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Upload, X, Check, Loader2, FileImage } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+
+import FileDropZone from "../components/upload/FileDropZone";
+import FilePreview from "../components/upload/FilePreview";
+
+const CATEGORIES = ["text", "logo", "landmark", "object", "product", "scene", "document", "receipt", "sign", "label"];
+const LIGHTING = ["bright", "normal", "dim", "backlit", "artificial"];
+
+export default function UploadPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [metadata, setMetadata] = useState({
+    category: "object",
+    subcategory: "",
+    lighting: "normal",
+    source: "upload",
+    tags: "",
+    notes: ""
+  });
+
+  const createImageMutation = useMutation({
+    mutationFn: (imageData) => base44.entities.DatasetImage.create(imageData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataset-images'] });
+    },
+  });
+
+  const handleFilesAdded = (newFiles) => {
+    setFiles(prev => [...prev, ...newFiles]);
+  };
+
+  const removeFile = (index) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpload = async () => {
+    if (files.length === 0) return;
+    
+    setUploading(true);
+    const uploadedImages = [];
+
+    for (const file of files) {
+      try {
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        await new Promise((resolve) => { img.onload = resolve; });
+        const resolution = `${img.width}x${img.height}`;
+
+        const imageData = {
+          file_url,
+          filename: file.name,
+          category: metadata.category,
+          subcategory: metadata.subcategory || null,
+          resolution,
+          lighting: metadata.lighting,
+          source: metadata.source,
+          status: "pending",
+          tags: metadata.tags ? metadata.tags.split(',').map(t => t.trim()) : [],
+          notes: metadata.notes || null,
+          annotations_count: 0
+        };
+
+        await createImageMutation.mutateAsync(imageData);
+        uploadedImages.push(imageData);
+      } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
+      }
+    }
+
+    setUploading(false);
+    setFiles([]);
+    navigate(createPageUrl("Dashboard"));
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Upload Training Images</h1>
+          <p className="text-gray-600">Add images to your dataset with metadata</p>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Card className="border-none shadow-lg mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileImage className="w-5 h-5" />
+                  Select Images
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FileDropZone onFilesAdded={handleFilesAdded} />
+                
+                {files.length > 0 && (
+                  <div className="mt-6 space-y-3">
+                    <h3 className="font-semibold text-sm text-gray-700">
+                      Selected Files ({files.length})
+                    </h3>
+                    {files.map((file, index) => (
+                      <FilePreview
+                        key={index}
+                        file={file}
+                        onRemove={() => removeFile(index)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="lg:col-span-1">
+            <Card className="border-none shadow-lg sticky top-4">
+              <CardHeader>
+                <CardTitle className="text-lg">Image Metadata</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>Category *</Label>
+                  <Select
+                    value={metadata.category}
+                    onValueChange={(value) => setMetadata({...metadata, category: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CATEGORIES.map(cat => (
+                        <SelectItem key={cat} value={cat}>
+                          {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Subcategory (e.g., bottle, phone)</Label>
+                  <Input
+                    value={metadata.subcategory}
+                    onChange={(e) => setMetadata({...metadata, subcategory: e.target.value})}
+                    placeholder="Specific object class"
+                  />
+                </div>
+
+                <div>
+                  <Label>Lighting Condition</Label>
+                  <Select
+                    value={metadata.lighting}
+                    onValueChange={(value) => setMetadata({...metadata, lighting: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LIGHTING.map(light => (
+                        <SelectItem key={light} value={light}>
+                          {light.charAt(0).toUpperCase() + light.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Tags (comma-separated)</Label>
+                  <Input
+                    value={metadata.tags}
+                    onChange={(e) => setMetadata({...metadata, tags: e.target.value})}
+                    placeholder="indoor, product, packaging"
+                  />
+                </div>
+
+                <div>
+                  <Label>Source</Label>
+                  <Input
+                    value={metadata.source}
+                    onChange={(e) => setMetadata({...metadata, source: e.target.value})}
+                    placeholder="camera, web, etc."
+                  />
+                </div>
+
+                <div>
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={metadata.notes}
+                    onChange={(e) => setMetadata({...metadata, notes: e.target.value})}
+                    placeholder="Additional information"
+                    rows={3}
+                  />
+                </div>
+
+                <Button
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                  onClick={handleUpload}
+                  disabled={files.length === 0 || uploading}
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload {files.length} {files.length === 1 ? 'Image' : 'Images'}
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

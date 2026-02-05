@@ -1,0 +1,329 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Upload, FileJson, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+
+export default function ImportPage() {
+  const [importing, setImporting] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  const [result, setResult] = useState(null);
+  const queryClient = useQueryClient();
+
+  const createAnnotationMutation = useMutation({
+    mutationFn: (data) => base44.entities.Annotation.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['annotations'] });
+    },
+  });
+
+  const updateImageMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.DatasetImage.update(id, data),
+  });
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setJsonInput(event.target.result);
+    };
+    reader.readAsText(file);
+  };
+
+  const parseLabelStudioJSON = (data) => {
+    // Label Studio format parsing
+    const annotations = [];
+    
+    data.forEach(task => {
+      if (!task.annotations || task.annotations.length === 0) return;
+      
+      const taskAnnotations = task.annotations[0];
+      const imageUrl = task.data?.image || task.data?.url;
+      
+      if (!imageUrl || !taskAnnotations.result) return;
+
+      taskAnnotations.result.forEach(result => {
+        if (result.type === 'rectanglelabels') {
+          const value = result.value;
+          annotations.push({
+            image_url: imageUrl,
+            type: 'object',
+            bbox: {
+              x: value.x * value.original_width / 100,
+              y: value.y * value.original_height / 100,
+              width: value.width * value.original_width / 100,
+              height: value.height * value.original_height / 100
+            },
+            class_label: value.rectanglelabels?.[0] || 'unknown',
+            confidence: 1.0
+          });
+        }
+      });
+    });
+
+    return annotations;
+  };
+
+  const parseGenericJSON = (data) => {
+    // Try to parse common annotation formats
+    const annotations = [];
+    
+    if (Array.isArray(data)) {
+      data.forEach(item => {
+        if (item.annotations && item.image_id) {
+          item.annotations.forEach(ann => {
+            annotations.push({
+              image_id: item.image_id,
+              ...ann
+            });
+          });
+        }
+      });
+    }
+
+    return annotations;
+  };
+
+  const handleImport = async () => {
+    if (!jsonInput.trim()) {
+      setResult({ success: false, message: 'Please provide JSON data' });
+      return;
+    }
+
+    setImporting(true);
+    setResult(null);
+
+    try {
+      const data = JSON.parse(jsonInput);
+      let parsedAnnotations = [];
+
+      // Try Label Studio format first
+      if (Array.isArray(data) && data[0]?.annotations) {
+        parsedAnnotations = parseLabelStudioJSON(data);
+      } else {
+        parsedAnnotations = parseGenericJSON(data);
+      }
+
+      if (parsedAnnotations.length === 0) {
+        setResult({ 
+          success: false, 
+          message: 'No annotations found. Please check the JSON format.' 
+        });
+        setImporting(false);
+        return;
+      }
+
+      // Get all dataset images to match by URL or ID
+      const allImages = await base44.entities.DatasetImage.list();
+      
+      let imported = 0;
+      let skipped = 0;
+
+      for (const ann of parsedAnnotations) {
+        // Find matching image
+        let matchedImage = null;
+        
+        if (ann.image_id) {
+          matchedImage = allImages.find(img => img.id === ann.image_id);
+        } else if (ann.image_url) {
+          matchedImage = allImages.find(img => img.file_url === ann.image_url);
+        }
+
+        if (matchedImage) {
+          await createAnnotationMutation.mutateAsync({
+            image_id: matchedImage.id,
+            type: ann.type || 'object',
+            bbox: ann.bbox,
+            class_label: ann.class_label,
+            transcription: ann.transcription,
+            confidence: ann.confidence || 1.0,
+            attributes: ann.attributes || {}
+          });
+
+          // Update image annotation count
+          await updateImageMutation.mutateAsync({
+            id: matchedImage.id,
+            data: {
+              annotations_count: (matchedImage.annotations_count || 0) + 1,
+              status: 'annotated'
+            }
+          });
+
+          imported++;
+        } else {
+          skipped++;
+        }
+      }
+
+      setResult({
+        success: true,
+        message: `Successfully imported ${imported} annotations. ${skipped > 0 ? `Skipped ${skipped} (no matching images).` : ''}`
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['dataset-images'] });
+      setJsonInput('');
+    } catch (error) {
+      console.error('Import error:', error);
+      setResult({
+        success: false,
+        message: `Import failed: ${error.message}`
+      });
+    }
+
+    setImporting(false);
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Import Annotations</h1>
+          <p className="text-gray-600">Import annotations from Label Studio or other tools</p>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6 mb-8">
+          <Card className="border-none shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileJson className="w-5 h-5" />
+                Upload JSON File
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="json-upload"
+              />
+              <label htmlFor="json-upload">
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors">
+                  <Upload className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                  <p className="font-medium mb-1">Click to upload JSON</p>
+                  <p className="text-sm text-gray-500">Label Studio or generic format</p>
+                </div>
+              </label>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-lg bg-blue-50">
+            <CardHeader>
+              <CardTitle className="text-lg">Supported Formats</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div>
+                <p className="font-semibold mb-1">✓ Label Studio</p>
+                <p className="text-gray-600 text-xs">Standard export format with tasks and annotations</p>
+              </div>
+              <div>
+                <p className="font-semibold mb-1">✓ Generic JSON</p>
+                <p className="text-gray-600 text-xs">Array of {`{image_id, annotations: [...]}`}</p>
+              </div>
+              <div>
+                <p className="font-semibold mb-1">✓ Custom Format</p>
+                <p className="text-gray-600 text-xs">Must include bbox and class_label</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="border-none shadow-lg mb-6">
+          <CardHeader>
+            <CardTitle>Or Paste JSON Directly</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Textarea
+              value={jsonInput}
+              onChange={(e) => setJsonInput(e.target.value)}
+              placeholder={`Paste Label Studio JSON or generic annotation format...
+
+Example:
+[
+  {
+    "image_id": "img_123",
+    "annotations": [
+      {
+        "type": "object",
+        "bbox": {"x": 45, "y": 78, "width": 110, "height": 200},
+        "class_label": "bottle"
+      }
+    ]
+  }
+]`}
+              className="font-mono text-xs h-64"
+            />
+            <Button
+              className="w-full mt-4 bg-gradient-to-r from-blue-600 to-indigo-600"
+              onClick={handleImport}
+              disabled={importing || !jsonInput.trim()}
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import Annotations
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {result && (
+          <Alert variant={result.success ? "default" : "destructive"}>
+            {result.success ? (
+              <CheckCircle className="h-4 w-4" />
+            ) : (
+              <AlertCircle className="h-4 w-4" />
+            )}
+            <AlertDescription>{result.message}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card className="border-none shadow-lg bg-gray-50">
+          <CardHeader>
+            <CardTitle className="text-lg">Label Studio Example</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-white rounded-lg p-4 font-mono text-xs overflow-x-auto">
+              <pre>{`[
+  {
+    "data": {
+      "image": "https://example.com/image.jpg"
+    },
+    "annotations": [
+      {
+        "result": [
+          {
+            "type": "rectanglelabels",
+            "value": {
+              "x": 10,
+              "y": 15,
+              "width": 30,
+              "height": 40,
+              "rectanglelabels": ["bottle"],
+              "original_width": 640,
+              "original_height": 480
+            }
+          }
+        ]
+      }
+    ]
+  }
+]`}</pre>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

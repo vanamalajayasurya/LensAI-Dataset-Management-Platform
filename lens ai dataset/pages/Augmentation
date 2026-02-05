@@ -1,0 +1,292 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { Wand2, RotateCw, Contrast, Droplet, Crop, Loader2 } from "lucide-react";
+
+export default function AugmentationPage() {
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [augmentations, setAugmentations] = useState({
+    rotation: 0,
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    flip: 'none'
+  });
+  const [generating, setGenerating] = useState(false);
+  const [preview, setPreview] = useState(null);
+
+  const { data: images = [] } = useQuery({
+    queryKey: ['augmentation-images'],
+    queryFn: async () => {
+      const all = await base44.entities.DatasetImage.list("-created_date");
+      return all.filter(img => img.status === "approved").slice(0, 20);
+    },
+  });
+
+  const generatePreview = async () => {
+    if (!selectedImage) return;
+    
+    setGenerating(true);
+    
+    try {
+      const prompt = `Generate an augmented version of this image with the following transformations:
+- Rotation: ${augmentations.rotation} degrees
+- Brightness: ${augmentations.brightness}%
+- Contrast: ${augmentations.contrast}%
+- Saturation: ${augmentations.saturation}%
+- Flip: ${augmentations.flip}
+
+Apply these transformations while preserving the main objects and their labels. Return the description of how it would look.`;
+
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt,
+        file_urls: [selectedImage.file_url]
+      });
+
+      setPreview(result);
+    } catch (error) {
+      console.error('Preview generation error:', error);
+    }
+    
+    setGenerating(false);
+  };
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Augmentation Preview</h1>
+          <p className="text-gray-600">Visualize how augmentations will transform your dataset</p>
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-6">
+          <div className="space-y-6">
+            <Card className="border-none shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wand2 className="w-5 h-5" />
+                  Select Image
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Select
+                  value={selectedImage?.id}
+                  onValueChange={(id) => setSelectedImage(images.find(img => img.id === id))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose an image..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {images.map(img => (
+                      <SelectItem key={img.id} value={img.id}>
+                        {img.filename}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {selectedImage && (
+                  <div className="mt-4">
+                    <img
+                      src={selectedImage.file_url}
+                      alt={selectedImage.filename}
+                      className="w-full h-64 object-cover rounded-lg"
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-lg">
+              <CardHeader>
+                <CardTitle>Augmentation Parameters</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="flex items-center gap-2">
+                      <RotateCw className="w-4 h-4" />
+                      Rotation
+                    </Label>
+                    <span className="text-sm font-medium">{augmentations.rotation}°</span>
+                  </div>
+                  <Slider
+                    value={[augmentations.rotation]}
+                    onValueChange={([value]) => setAugmentations({...augmentations, rotation: value})}
+                    min={-45}
+                    max={45}
+                    step={5}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="flex items-center gap-2">
+                      <Contrast className="w-4 h-4" />
+                      Brightness
+                    </Label>
+                    <span className="text-sm font-medium">{augmentations.brightness}%</span>
+                  </div>
+                  <Slider
+                    value={[augmentations.brightness]}
+                    onValueChange={([value]) => setAugmentations({...augmentations, brightness: value})}
+                    min={50}
+                    max={150}
+                    step={10}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="flex items-center gap-2">
+                      <Contrast className="w-4 h-4" />
+                      Contrast
+                    </Label>
+                    <span className="text-sm font-medium">{augmentations.contrast}%</span>
+                  </div>
+                  <Slider
+                    value={[augmentations.contrast]}
+                    onValueChange={([value]) => setAugmentations({...augmentations, contrast: value})}
+                    min={50}
+                    max={150}
+                    step={10}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="flex items-center gap-2">
+                      <Droplet className="w-4 h-4" />
+                      Saturation
+                    </Label>
+                    <span className="text-sm font-medium">{augmentations.saturation}%</span>
+                  </div>
+                  <Slider
+                    value={[augmentations.saturation]}
+                    onValueChange={([value]) => setAugmentations({...augmentations, saturation: value})}
+                    min={0}
+                    max={200}
+                    step={10}
+                  />
+                </div>
+
+                <div>
+                  <Label className="mb-2 block">Flip</Label>
+                  <Select
+                    value={augmentations.flip}
+                    onValueChange={(value) => setAugmentations({...augmentations, flip: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="horizontal">Horizontal</SelectItem>
+                      <SelectItem value="vertical">Vertical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600"
+                  onClick={generatePreview}
+                  disabled={!selectedImage || generating}
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-4 h-4 mr-2" />
+                      Generate Preview
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div>
+            <Card className="border-none shadow-lg h-full">
+              <CardHeader>
+                <CardTitle>Augmentation Preview</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {preview ? (
+                  <div className="space-y-4">
+                    <div className="p-6 bg-blue-50 rounded-lg">
+                      <p className="text-sm text-gray-700">{preview}</p>
+                    </div>
+                    
+                    <div className="border-t pt-4">
+                      <h4 className="font-semibold mb-3">Applied Transformations:</h4>
+                      <div className="space-y-2 text-sm">
+                        {augmentations.rotation !== 0 && (
+                          <div className="flex items-center gap-2">
+                            <RotateCw className="w-4 h-4 text-purple-600" />
+                            <span>Rotated {augmentations.rotation}°</span>
+                          </div>
+                        )}
+                        {augmentations.brightness !== 100 && (
+                          <div className="flex items-center gap-2">
+                            <Contrast className="w-4 h-4 text-yellow-600" />
+                            <span>Brightness {augmentations.brightness}%</span>
+                          </div>
+                        )}
+                        {augmentations.contrast !== 100 && (
+                          <div className="flex items-center gap-2">
+                            <Contrast className="w-4 h-4 text-blue-600" />
+                            <span>Contrast {augmentations.contrast}%</span>
+                          </div>
+                        )}
+                        {augmentations.saturation !== 100 && (
+                          <div className="flex items-center gap-2">
+                            <Droplet className="w-4 h-4 text-green-600" />
+                            <span>Saturation {augmentations.saturation}%</span>
+                          </div>
+                        )}
+                        {augmentations.flip !== 'none' && (
+                          <div className="flex items-center gap-2">
+                            <Crop className="w-4 h-4 text-orange-600" />
+                            <span>Flipped {augmentations.flip}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-96 flex items-center justify-center text-gray-400">
+                    <div className="text-center">
+                      <Wand2 className="w-16 h-16 mx-auto mb-4 opacity-20" />
+                      <p>Select an image and configure augmentations</p>
+                      <p className="text-sm mt-2">Then click "Generate Preview"</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-lg mt-6 bg-purple-50">
+              <CardContent className="p-6">
+                <h4 className="font-semibold mb-2">Common Augmentation Strategies</h4>
+                <ul className="text-sm space-y-2 text-gray-700">
+                  <li>• <strong>Rotation:</strong> ±15° for general objects</li>
+                  <li>• <strong>Brightness:</strong> 80-120% for lighting variations</li>
+                  <li>• <strong>Horizontal Flip:</strong> For symmetric objects</li>
+                  <li>• <strong>Contrast:</strong> 80-120% for different cameras</li>
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

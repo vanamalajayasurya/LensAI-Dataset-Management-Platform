@@ -1,0 +1,61 @@
+{
+  "name": "Annotation",
+  "type": "object",
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "description": "Reference to DatasetImage ID"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "object",
+        "logo",
+        "landmark",
+        "product"
+      ],
+      "description": "Annotation type"
+    },
+    "bbox": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "description": "Bounding box coordinates"
+    },
+    "class_label": {
+      "type": "string",
+      "description": "Object class (bottle, phone, etc.)"
+    },
+    "transcription": {
+      "type": "string",
+      "description": "Text transcription for OCR annotations"
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Annotation confidence (0-1)"
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Additional attributes (brand, color, etc.)"
+    }
+  },
+  "required": [
+    "image_id",
+    "type",
+    "bbox"
+  ]
+}

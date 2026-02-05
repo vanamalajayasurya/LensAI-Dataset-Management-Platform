@@ -1,0 +1,141 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Search, TrendingUp, AlertTriangle } from "lucide-react";
+
+import ImageGrid from "../components/inspector/ImageGrid";
+import BalanceChart from "../components/inspector/BalanceChart";
+import QualityMetrics from "../components/inspector/QualityMetrics";
+
+export default function InspectorPage() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const { data: images = [] } = useQuery({
+    queryKey: ['all-dataset-images'],
+    queryFn: () => base44.entities.DatasetImage.list("-created_date"),
+  });
+
+  const { data: annotations = [] } = useQuery({
+    queryKey: ['all-annotations'],
+    queryFn: () => base44.entities.Annotation.list(),
+  });
+
+  const filteredImages = images.filter(img => {
+    const matchesSearch = !searchQuery || 
+      img.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      img.subcategory?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      img.tags?.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    const matchesCategory = categoryFilter === "all" || img.category === categoryFilter;
+    const matchesStatus = statusFilter === "all" || img.status === statusFilter;
+    
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
+
+  const categoryStats = images.reduce((acc, img) => {
+    acc[img.category] = (acc[img.category] || 0) + 1;
+    return acc;
+  }, {});
+
+  const statusStats = images.reduce((acc, img) => {
+    acc[img.status] = (acc[img.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  const imbalanceWarnings = Object.entries(categoryStats).filter(
+    ([_, count]) => count < 100
+  );
+
+  return (
+    <div className="min-h-screen p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Dataset Inspector</h1>
+          <p className="text-gray-600">Analyze balance, quality, and distribution</p>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6 mb-8">
+          <BalanceChart categoryStats={categoryStats} />
+          <QualityMetrics images={images} annotations={annotations} />
+          
+          {imbalanceWarnings.length > 0 && (
+            <Card className="border-none shadow-lg bg-orange-50">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                  <CardTitle className="text-lg">Imbalance Warnings</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {imbalanceWarnings.map(([category, count]) => (
+                    <div key={category} className="flex justify-between items-center">
+                      <span className="text-sm">{category}</span>
+                      <Badge variant="outline" className="bg-white">
+                        {count} images
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-600 mt-4">
+                  Categories with &lt;100 images may cause training issues
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <Card className="border-none shadow-lg mb-6">
+          <CardContent className="p-6">
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input
+                  placeholder="Search images..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {Object.keys(categoryStats).map(cat => (
+                    <SelectItem key={cat} value={cat}>
+                      {cat} ({categoryStats[cat]})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="annotated">Annotated</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <ImageGrid images={filteredImages} />
+      </div>
+    </div>
+  );
+}

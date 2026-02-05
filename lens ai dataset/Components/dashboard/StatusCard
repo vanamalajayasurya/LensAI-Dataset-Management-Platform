@@ -1,0 +1,18 @@
+import React from "react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
+export default function StatsCard({ title, value, icon: Icon, gradient }) {
+  return (
+    <Card className="border-none shadow-lg hover:shadow-xl transition-shadow duration-300">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <h3 className="text-sm font-medium text-gray-600">{title}</h3>
+        <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center`}>
+          <Icon className="w-5 h-5 text-white" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-3xl font-bold">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}

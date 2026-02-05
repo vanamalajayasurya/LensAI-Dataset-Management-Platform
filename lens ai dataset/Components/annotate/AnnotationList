@@ -1,0 +1,62 @@
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Trash2, Tag } from "lucide-react";
+
+export default function AnnotationList({ annotations, onDelete }) {
+  if (annotations.length === 0) {
+    return (
+      <Card className="border-none shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-lg">Annotations</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-gray-500 text-sm text-center py-4">
+            No annotations yet
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-none shadow-lg">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Tag className="w-5 h-5" />
+          <CardTitle className="text-lg">Annotations ({annotations.length})</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {annotations.map((ann, index) => (
+            <div key={ann.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="secondary">{ann.type}</Badge>
+                  {ann.class_label && (
+                    <span className="font-medium text-sm">{ann.class_label}</span>
+                  )}
+                </div>
+                {ann.transcription && (
+                  <p className="text-xs text-gray-600 truncate">{ann.transcription}</p>
+                )}
+                <p className="text-xs text-gray-400">
+                  {Math.round(ann.bbox.width)}×{Math.round(ann.bbox.height)}px
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onDelete(ann.id)}
+              >
+                <Trash2 className="w-4 h-4 text-red-600" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

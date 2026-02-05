@@ -1,0 +1,195 @@
+import React from "react";
+import { motion } from "framer-motion";
+
+// IMPROVED: More robust bbox format detection and normalization
+function normalizeBbox(bbox, naturalWidth, naturalHeight) {
+  if (!bbox || bbox.length !== 4) {
+    console.error('Invalid bbox: must have 4 values', bbox);
+    return null;
+  }
+  
+  const [val1, val2, val3, val4] = bbox.map(Number);
+  
+  // Check if values are valid numbers
+  if ([val1, val2, val3, val4].some(v => isNaN(v))) {
+    console.error('Invalid bbox: contains NaN', bbox);
+    return null;
+  }
+
+  // DETECTION STRATEGY:
+  // 1. If all values are between 0-1, they're normalized coordinates
+  // 2. If val3 > val1 AND val4 > val2, it's Pascal VOC [x_min, y_min, x_max, y_max]
+  // 3. Otherwise, it's COCO format [x, y, width, height]
+  
+  const allNormalized = [val1, val2, val3, val4].every(v => v >= 0 && v <= 1);
+  
+  if (allNormalized) {
+    // Normalized coordinates (0-1 range) - convert to pixels
+    console.log('Detected normalized coordinates, converting to pixels');
+    return {
+      x: val1 * naturalWidth,
+      y: val2 * naturalHeight,
+      width: val3 * naturalWidth,
+      height: val4 * naturalHeight
+    };
+  }
+  
+  // Check for Pascal VOC format: x_max > x_min AND y_max > y_min
+  const isPascalVOC = val3 > val1 && val4 > val2;
+  
+  if (isPascalVOC) {
+    // Pascal VOC: [x_min, y_min, x_max, y_max]
+    console.log('Detected Pascal VOC format:', bbox);
+    return {
+      x: Math.max(0, val1),
+      y: Math.max(0, val2),
+      width: Math.max(0, val3 - val1),
+      height: Math.max(0, val4 - val2)
+    };
+  }
+  
+  // COCO format: [x, y, width, height]
+  console.log('Detected COCO format:', bbox);
+  return {
+    x: Math.max(0, val1),
+    y: Math.max(0, val2),
+    width: Math.max(0, val3),
+    height: Math.max(0, val4)
+  };
+}
+
+export default function BoundingBox({ object, imageDimensions, isSelected, onClick }) {
+  const { bbox, label, confidence } = object;
+  const { width: imgWidth, height: imgHeight, naturalWidth, naturalHeight } = imageDimensions;
+
+  // Validation: Check all required dimensions are available
+  if (!bbox || !imgWidth || !imgHeight || !naturalWidth || !naturalHeight) {
+    console.warn('Missing dimensions:', { imgWidth, imgHeight, naturalWidth, naturalHeight });
+    return null;
+  }
+
+  // Wait for valid dimensions (not zero)
+  if (imgWidth === 0 || imgHeight === 0 || naturalWidth === 0 || naturalHeight === 0) {
+    return null;
+  }
+
+  // Step 1: Normalize bbox to standard [x, y, width, height] format
+  const normalizedBbox = normalizeBbox(bbox, naturalWidth, naturalHeight);
+  if (!normalizedBbox) return null;
+
+  // Step 2: Validate normalized bbox is within natural image bounds
+  const withinBounds = 
+    normalizedBbox.x >= 0 &&
+    normalizedBbox.y >= 0 &&
+    normalizedBbox.x + normalizedBbox.width <= naturalWidth * 1.1 && // 10% tolerance
+    normalizedBbox.y + normalizedBbox.height <= naturalHeight * 1.1;
+
+  if (!withinBounds) {
+    console.warn('Bbox outside natural image bounds:', {
+      bbox: normalizedBbox,
+      naturalDims: { naturalWidth, naturalHeight },
+      label
+    });
+    // Clamp to bounds instead of rejecting
+    normalizedBbox.x = Math.max(0, Math.min(normalizedBbox.x, naturalWidth));
+    normalizedBbox.y = Math.max(0, Math.min(normalizedBbox.y, naturalHeight));
+    normalizedBbox.width = Math.min(normalizedBbox.width, naturalWidth - normalizedBbox.x);
+    normalizedBbox.height = Math.min(normalizedBbox.height, naturalHeight - normalizedBbox.y);
+  }
+
+  // Step 3: Calculate scaling factors
+  const scaleX = imgWidth / naturalWidth;
+  const scaleY = imgHeight / naturalHeight;
+
+  console.log('Scaling:', {
+    label,
+    naturalDims: { naturalWidth, naturalHeight },
+    displayedDims: { imgWidth, imgHeight },
+    scale: { scaleX, scaleY },
+    originalBbox: bbox,
+    normalizedBbox
+  });
+
+  // Step 4: Apply scaling to get displayed coordinates
+  const scaledBbox = {
+    x: normalizedBbox.x * scaleX,
+    y: normalizedBbox.y * scaleY,
+    width: normalizedBbox.width * scaleX,
+    height: normalizedBbox.height * scaleY
+  };
+
+  // Validation: Ensure minimum visible size (10px)
+  if (scaledBbox.width < 10 || scaledBbox.height < 10) {
+    console.warn('Bbox too small after scaling:', { label, scaledBbox });
+  }
+
+  // Final positioning
+  const boxStyle = {
+    position: 'absolute',
+    left: `${scaledBbox.x}px`,
+    top: `${scaledBbox.y}px`,
+    width: `${scaledBbox.width}px`,
+    height: `${scaledBbox.height}px`,
+    pointerEvents: 'auto',
+    cursor: 'pointer'
+  };
+
+  return (
+    <motion.div
+      style={boxStyle}
+      onClick={onClick}
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      whileHover={{ scale: 1.02 }}
+      transition={{ duration: 0.2 }}
+      className={`group ${isSelected ? 'z-20' : 'z-10'}`}
+    >
+      {/* Bounding box border with glow effect */}
+      <div
+        className={`absolute inset-0 rounded-lg transition-all duration-300 ${
+          isSelected
+            ? 'border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.6)]'
+            : 'border-blue-400 group-hover:border-purple-400 group-hover:shadow-[0_0_15px_rgba(168,85,247,0.4)]'
+        }`}
+        style={{
+          borderWidth: '3px',
+          borderStyle: 'solid',
+          boxShadow: isSelected ? '0 0 20px rgba(168, 85, 247, 0.6)' : undefined
+        }}
+      />
+
+      {/* Label with confidence - positioned ABOVE the box */}
+      <motion.div
+        initial={{ y: -10, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        className={`absolute left-0 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap shadow-lg ${
+          isSelected
+            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
+            : 'bg-white text-gray-800 border-2 border-blue-400 group-hover:border-purple-400'
+        }`}
+        style={{
+          top: '-32px',
+          zIndex: 100
+        }}
+      >
+        {label}
+        {confidence && (
+          <span className={`ml-1 ${isSelected ? 'opacity-90' : 'opacity-70'}`}>
+            {Math.round(confidence * 100)}%
+          </span>
+        )}
+      </motion.div>
+
+      {/* Corner indicators on hover */}
+      {!isSelected && (
+        <>
+          <div className="absolute -top-1 -left-1 w-3 h-3 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+        </>
+      )}
+    </motion.div>
+  );
+}

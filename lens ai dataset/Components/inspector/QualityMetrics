@@ -1,0 +1,59 @@
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CheckCircle, AlertCircle, Tag } from "lucide-react";
+
+export default function QualityMetrics({ images, annotations }) {
+  const annotatedCount = images.filter(img => img.annotations_count > 0).length;
+  const approvedCount = images.filter(img => img.status === "approved").length;
+  const avgAnnotationsPerImage = images.length > 0 
+    ? (annotations.length / images.length).toFixed(1)
+    : 0;
+
+  return (
+    <Card className="border-none shadow-lg">
+      <CardHeader>
+        <CardTitle>Quality Metrics</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <span className="text-sm">Approved</span>
+          </div>
+          <span className="font-bold">{approvedCount}</span>
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tag className="w-5 h-5 text-blue-600" />
+            <span className="text-sm">Annotated</span>
+          </div>
+          <span className="font-bold">{annotatedCount}</span>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-purple-600" />
+            <span className="text-sm">Avg. Annotations</span>
+          </div>
+          <span className="font-bold">{avgAnnotationsPerImage}</span>
+        </div>
+
+        <div className="pt-4 border-t">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Completion Rate</span>
+            <span className="font-semibold">
+              {images.length > 0 ? Math.round((annotatedCount / images.length) * 100) : 0}%
+            </span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+            <div
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${images.length > 0 ? (annotatedCount / images.length) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

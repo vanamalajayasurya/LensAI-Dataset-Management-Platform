@@ -1,0 +1,158 @@
+import React, { useState, useRef, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ExternalLink, Search, ShoppingCart, Book } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
+import BoundingBox from "./BoundingBox";
+import RelatedLinksPanel from "./RelatedLinksPanel";
+
+export default function ObjectDetectionViewer({ imageUrl, detectedObjects }) {
+  const [selectedObject, setSelectedObject] = useState(null);
+  const [showBoxes, setShowBoxes] = useState(false); // Toggle for bounding boxes (default: OFF)
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const imageRef = useRef(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (imageRef.current) {
+        const img = imageRef.current;
+        
+        // Wait for image to fully load
+        if (!img.complete) return;
+        
+        setImageDimensions({
+          width: img.clientWidth,
+          height: img.clientHeight,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight
+        });
+      }
+    };
+
+    if (imageRef.current) {
+      const img = imageRef.current;
+      
+      if (img.complete) {
+        updateDimensions();
+      } else {
+        img.addEventListener('load', updateDimensions);
+      }
+      
+      // Handle window resize
+      window.addEventListener('resize', updateDimensions);
+      
+      return () => {
+        img.removeEventListener('load', updateDimensions);
+        window.removeEventListener('resize', updateDimensions);
+      };
+    }
+  }, [imageUrl]);
+
+  const handleObjectClick = (obj) => {
+    setSelectedObject(selectedObject?.label === obj.label ? null : obj);
+  };
+
+  if (!detectedObjects || detectedObjects.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-2">
+        <Card className="border-none shadow-2xl overflow-hidden">
+          <div className="relative" ref={containerRef} style={{ position: 'relative' }}>
+            <img
+              ref={imageRef}
+              src={imageUrl}
+              alt="Object detection"
+              className="w-full h-auto block"
+              style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
+              crossOrigin="anonymous"
+            />
+            
+            {/* Bounding boxes only shown when toggle is ON */}
+            {showBoxes && imageDimensions.width > 0 && imageDimensions.naturalWidth > 0 && (
+              <>
+                {detectedObjects.map((obj, index) => (
+                  <BoundingBox
+                    key={`${obj.label}-${index}`}
+                    object={obj}
+                    imageDimensions={imageDimensions}
+                    isSelected={selectedObject?.label === obj.label}
+                    onClick={() => handleObjectClick(obj)}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+
+          <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-gradient-to-r from-purple-600 to-blue-600 text-white">
+                  {detectedObjects.length} object{detectedObjects.length !== 1 ? 's' : ''} detected
+                </Badge>
+                {imageDimensions.naturalWidth > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {imageDimensions.naturalWidth}×{imageDimensions.naturalHeight}px
+                  </Badge>
+                )}
+              </div>
+              <button
+                onClick={() => setShowBoxes(!showBoxes)}
+                className="text-xs font-medium text-purple-600 hover:text-purple-800 transition-colors"
+              >
+                {showBoxes ? 'Hide' : 'Show'} boxes
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {detectedObjects.map((obj, index) => (
+                <motion.button
+                  key={index}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleObjectClick(obj)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                    selectedObject?.label === obj.label
+                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg'
+                      : 'bg-white text-gray-700 hover:bg-purple-50 border border-purple-200'
+                  }`}
+                >
+                  {obj.label} {obj.confidence && `(${Math.round(obj.confidence * 100)}%)`}
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="lg:col-span-1">
+        <AnimatePresence mode="wait">
+          {selectedObject ? (
+            <RelatedLinksPanel
+              object={selectedObject}
+              imageUrl={imageUrl} // Added imageUrl prop here
+              onClose={() => setSelectedObject(null)}
+            />
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+            >
+              <Card className="border-none shadow-xl p-6 bg-gradient-to-br from-purple-50 to-blue-50">
+                <div className="text-center text-gray-500">
+                  <Search className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">Click an object to explore</p>
+                  <p className="text-sm mt-2">See related links and information</p>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
